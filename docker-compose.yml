@@ -105,7 +105,7 @@ services:
     init: true
 
     # --- COMMAND ---
-    command: ["node", "openclaw.mjs", "gateway", "--bind", "${OPENCLAW_GATEWAY_BIND:-lan}", "--port", "18789"]
+    command: ["node", "openclaw.mjs", "gateway", "--bind", "${OPENCLAW_GATEWAY_BIND:-lan}", "--port", "18789", "--allow-unconfigured"]
 
     # --- HEALTH & LIFECYCLE ---
     healthcheck:
