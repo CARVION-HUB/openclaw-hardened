@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # Subnet do Docker bridge para a rede frontend (deve bater com docker-compose.yml)
-OPENCLAW_SUBNET="172.28.1.0/24"
+OPENCLAW_SUBNET="172.30.1.0/24"
 
 # Nome da chain iptables customizada
 CHAIN="OPENCLAW_EGRESS"

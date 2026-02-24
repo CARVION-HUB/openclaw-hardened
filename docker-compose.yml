@@ -21,7 +21,7 @@ networks:
     internal: false
     ipam:
       config:
-        - subnet: 172.28.1.0/24
+        - subnet: 172.30.1.0/24
 
   # Tailscale: VPN mesh access
   tailscale_net:
