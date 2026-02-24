@@ -101,6 +101,8 @@ services:
       - TERM=xterm-256color
       - NODE_ENV=production
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
 
     # --- INIT: tini para tratamento correto de sinais ---
     init: true
