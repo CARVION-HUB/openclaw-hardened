@@ -93,6 +93,7 @@ services:
     volumes:
       - openclaw_config:/home/node/.openclaw:rw
       - openclaw_workspace:/home/node/.openclaw/workspace:rw
+      - ./config/config.yaml:/home/node/.openclaw/config.yaml:ro
 
     # --- ENVIRONMENT ---
     environment:
