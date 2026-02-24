@@ -1,0 +1,31 @@
+# ============================================================
+# alertmanager.yml -- Roteamento de alertas
+# ============================================================
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: "default"
+  group_by: ["alertname", "severity"]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 1h
+
+  routes:
+    - receiver: "critical-webhook"
+      match:
+        severity: critical
+      group_wait: 0s
+      repeat_interval: 5m
+
+receivers:
+  - name: "default"
+    webhook_configs:
+      - url: "http://placeholder:9999/alert"
+        send_resolved: true
+
+  - name: "critical-webhook"
+    webhook_configs:
+      - url: "http://placeholder:9999/alert"
+        send_resolved: true

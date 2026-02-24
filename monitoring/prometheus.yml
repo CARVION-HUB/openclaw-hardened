@@ -1,0 +1,31 @@
+# ============================================================
+# prometheus.yml -- Coleta de metricas para infraestrutura OpenClaw
+# ============================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # Metricas do OpenClaw Gateway
+  # O gateway expoe metricas basicas via HTTP
+  - job_name: "openclaw-gateway"
+    static_configs:
+      - targets: ["openclaw-gateway:18789"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+    scrape_interval: 60s

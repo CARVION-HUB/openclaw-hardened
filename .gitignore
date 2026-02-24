@@ -1,0 +1,40 @@
+# Segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# Repositorio clonado do OpenClaw (nao versionar)
+openclaw-src/
+
+# Node.js
+node_modules/
+
+# Python (legacy)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (dev local)
+data/
+
+# Logs
+*.log
+logs/

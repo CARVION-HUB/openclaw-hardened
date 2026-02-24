@@ -1,0 +1,356 @@
+# ============================================================
+# docker-compose.yml -- OpenClaw Gateway (HARDENED / macOS)
+# Seguranca suprema: read-only FS, cap_drop ALL, no-new-privileges
+#
+# NOTA macOS:
+#   - Docker Desktop roda uma VM Linux (LinuxKit) por baixo
+#   - AppArmor NAO esta disponivel no macOS (seccomp funciona)
+#   - Tailscale usa modo userspace (sem /dev/net/tun no Mac)
+#
+# PRE-REQUISITO: Construa a imagem OpenClaw antes de subir:
+#   git clone https://github.com/openclaw/openclaw.git openclaw-src
+#   docker build -t openclaw:local -f openclaw-src/Dockerfile openclaw-src/
+#
+# Ou use o script automatizado: bash setup.sh
+# ============================================================
+
+networks:
+  # Frontend: Caddy <-> OpenClaw Gateway
+  frontend:
+    driver: bridge
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.28.1.0/24
+
+  # Tailscale: VPN mesh access
+  tailscale_net:
+    driver: bridge
+    internal: false
+
+volumes:
+  openclaw_config:
+    driver: local
+  openclaw_workspace:
+    driver: local
+  tailscale_state:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+  prometheus_data:
+    driver: local
+
+services:
+
+  # ----------------------------------------------------------
+  # OPENCLAW GATEWAY: Agente de IA multi-canal
+  # Gateway WebSocket + Control UI na porta 18789
+  # ----------------------------------------------------------
+  openclaw-gateway:
+    image: ${OPENCLAW_IMAGE:-openclaw:local}
+    container_name: openclaw-gateway
+
+    # --- FILESYSTEM: Read-only root ---
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=200m
+      - /home/node/.cache:rw,noexec,nosuid,size=100m
+
+    # --- CAPABILITIES: Drop ALL, add NOTHING ---
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./security/seccomp-openclaw.json
+      # AppArmor NAO disponivel no macOS. Em Linux com AppArmor, descomente:
+      # - apparmor=openclaw-profile
+
+    # --- RESOURCE LIMITS ---
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+          pids: 256
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+      nproc:
+        soft: 256
+        hard: 512
+
+    # --- NETWORKING: Zero published ports ---
+    networks:
+      - frontend
+
+    # --- VOLUMES ---
+    volumes:
+      - openclaw_config:/home/node/.openclaw:rw
+      - openclaw_workspace:/home/node/.openclaw/workspace:rw
+
+    # --- ENVIRONMENT ---
+    environment:
+      - HOME=/home/node
+      - TERM=xterm-256color
+      - NODE_ENV=production
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+
+    # --- INIT: tini para tratamento correto de sinais ---
+    init: true
+
+    # --- COMMAND ---
+    command: ["node", "openclaw.mjs", "gateway", "--bind", "${OPENCLAW_GATEWAY_BIND:-lan}", "--port", "18789"]
+
+    # --- HEALTH & LIFECYCLE ---
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:18789/').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+    # --- LOGGING com rotacao ---
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "openclaw-gateway|{{.ID}}"
+
+  # ----------------------------------------------------------
+  # OPENCLAW CLI: Ferramenta interativa para setup e gerenciamento
+  # Uso: docker compose run --rm openclaw-cli onboard
+  #      docker compose run --rm openclaw-cli channels login
+  # ----------------------------------------------------------
+  openclaw-cli:
+    image: ${OPENCLAW_IMAGE:-openclaw:local}
+    container_name: openclaw-cli
+    profiles:
+      - cli
+
+    # CLI precisa de acesso interativo
+    stdin_open: true
+    tty: true
+    init: true
+
+    # --- SECURITY: Mesma postura que o gateway ---
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    networks:
+      - frontend
+
+    volumes:
+      - openclaw_config:/home/node/.openclaw:rw
+      - openclaw_workspace:/home/node/.openclaw/workspace:rw
+
+    environment:
+      - HOME=/home/node
+      - TERM=xterm-256color
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - BROWSER=echo
+
+    entrypoint: ["node", "openclaw.mjs"]
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ----------------------------------------------------------
+  # CADDY: Reverse Proxy + TLS + Rate Limiting
+  # ----------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: openclaw-caddy
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 64
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+    networks:
+      - frontend
+
+    # Zero portas publicas -- acesso via Tailscale apenas
+    # Descomente abaixo SOMENTE se nao usar Tailscale:
+    # ports:
+    #   - "443:443"
+    #   - "80:80"
+
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data:rw
+      - caddy_config:/config:rw
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "caddy|{{.ID}}"
+
+  # ----------------------------------------------------------
+  # TAILSCALE: VPN Mesh (zero public ports)
+  # macOS: usa modo userspace (sem /dev/net/tun)
+  # ----------------------------------------------------------
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: openclaw-tailscale
+    hostname: openclaw-node
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+          pids: 32
+
+    networks:
+      - tailscale_net
+      - frontend
+
+    volumes:
+      - tailscale_state:/var/lib/tailscale:rw
+      # macOS: SEM mount de /dev/net/tun (nao existe no Docker Desktop Mac)
+      # Em Linux, descomente a linha abaixo:
+      # - /dev/net/tun:/dev/net/tun
+
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      # macOS: modo userspace obrigatorio (sem tun device)
+      - TS_USERSPACE=true
+      - TS_EXTRA_ARGS=--advertise-tags=tag:openclaw --accept-dns=false
+
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+        tag: "tailscale|{{.ID}}"
+
+  # ----------------------------------------------------------
+  # PROMETHEUS: Armazenamento de metricas e alertas
+  # ----------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: openclaw-prometheus
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+          pids: 64
+
+    networks:
+      - frontend
+
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus:rw
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--storage.tsdb.retention.size=1GB"
+      - "--storage.tsdb.path=/prometheus"
+
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ----------------------------------------------------------
+  # ALERTMANAGER: Roteamento de alertas
+  # ----------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: openclaw-alertmanager
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+          pids: 32
+
+    networks:
+      - frontend
+
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

@@ -1,0 +1,19 @@
+# ============================================================
+# .dockerignore -- Nao e usado diretamente (build e do OpenClaw src)
+# ============================================================
+# Este projeto nao constroi sua propria imagem Docker.
+# A imagem e construida a partir do repositorio oficial do OpenClaw.
+# Este arquivo existe apenas para evitar que o Docker Desktop
+# envie arquivos desnecessarios para o daemon.
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+.git
+openclaw-src/
+node_modules/
+*.log
+.DS_Store

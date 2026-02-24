@@ -1,0 +1,85 @@
+# ============================================================
+# Caddyfile -- Reverse Proxy para OpenClaw Gateway
+# ============================================================
+
+# Opcoes globais
+{
+	# Admin API apenas em localhost (nao exposta)
+	admin localhost:2019
+
+	# Email para registro ACME/TLS
+	email {$ACME_EMAIL:admin@example.com}
+
+	# Logging
+	log {
+		level INFO
+		output stdout
+		format json
+	}
+
+	# Seguranca: limitar tamanho do header
+	servers {
+		max_header_size 16KB
+	}
+}
+
+# ============================================================
+# Site principal -- proxy para o OpenClaw Gateway
+# ============================================================
+{$CADDY_DOMAIN:localhost} {
+	# Configuracao TLS
+	tls {
+		protocols tls1.2 tls1.3
+		ciphers TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+	}
+
+	# Security headers
+	header {
+		# HSTS
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		# Prevenir clickjacking
+		X-Frame-Options "DENY"
+		# Protecao XSS
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		# Referrer policy
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# CSP relaxado para permitir a UI do OpenClaw
+		Content-Security-Policy "default-src 'self' ws: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; font-src 'self' data:"
+		# Remover identificacao do servidor
+		-Server
+		-X-Powered-By
+	}
+
+	# Limite de tamanho do body (prevenir DoS via payloads grandes)
+	request_body {
+		max_size 10MB
+	}
+
+	# Log de acesso
+	log {
+		output stdout
+		format json {
+			time_format iso8601
+		}
+	}
+
+	# Reverse proxy para OpenClaw Gateway
+	reverse_proxy openclaw-gateway:18789 {
+		# Health checking do upstream
+		health_uri /
+		health_interval 30s
+		health_timeout 10s
+
+		# Timeouts (WebSocket precisa de timeouts mais longos)
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 120s
+			read_timeout 0
+			write_timeout 0
+		}
+
+		# Passar IP real do cliente
+		header_up X-Real-IP {remote_host}
+	}
+}

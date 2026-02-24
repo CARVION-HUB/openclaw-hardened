@@ -1,0 +1,86 @@
+# ============================================================
+# container-alerts.yml -- Deteccao de anomalias para OpenClaw
+# ============================================================
+
+groups:
+  - name: openclaw_security_alerts
+    rules:
+
+      # ---- Alertas de CPU ----
+      - alert: OpenClawHighCPU
+        expr: rate(container_cpu_usage_seconds_total{name="openclaw-gateway"}[5m]) > 0.8
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU do OpenClaw Gateway acima de 80% por 2 minutos"
+          description: "Container {{ $labels.name }} uso de CPU em {{ $value | humanizePercentage }}"
+
+      - alert: OpenClawCPUSpike
+        expr: rate(container_cpu_usage_seconds_total{name="openclaw-gateway"}[1m]) > 1.5
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "CRITICO: Spike de CPU detectado no OpenClaw (possivel mineracao cripto ou DoS)"
+
+      # ---- Alertas de Memoria ----
+      - alert: OpenClawHighMemory
+        expr: container_memory_usage_bytes{name="openclaw-gateway"} / container_spec_memory_limit_bytes{name="openclaw-gateway"} > 0.85
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memoria do OpenClaw acima de 85% do limite"
+
+      - alert: OpenClawOOMRisk
+        expr: container_memory_usage_bytes{name="openclaw-gateway"} / container_spec_memory_limit_bytes{name="openclaw-gateway"} > 0.95
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "CRITICO: OpenClaw se aproximando do limite de OOM kill"
+
+      # ---- Alertas de Rede ----
+      - alert: OpenClawNetworkEgressSpike
+        expr: rate(container_network_transmit_bytes_total{name="openclaw-gateway"}[5m]) > 5242880
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Trafego de saida do OpenClaw acima de 5MB/s por 2 minutos (possivel exfiltracao de dados)"
+
+      - alert: OpenClawUnexpectedConnections
+        expr: increase(container_network_tcp_usage_total{name="openclaw-gateway"}[5m]) > 100
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CRITICO: Numero incomum de novas conexoes TCP do OpenClaw"
+
+      # ---- Alertas de Processos ----
+      - alert: OpenClawProcessForkBomb
+        expr: container_processes{name="openclaw-gateway"} > 200
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "CRITICO: Contagem de processos se aproximando do limite de PIDs (possivel fork bomb)"
+
+      # ---- Ciclo de Vida do Container ----
+      - alert: OpenClawFrequentRestarts
+        expr: increase(container_start_time_seconds{name="openclaw-gateway"}[1h]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container OpenClaw reiniciou mais de 5 vezes na ultima hora"
+
+      # ---- Alertas de Filesystem ----
+      - alert: OpenClawWorkspaceNearFull
+        expr: container_fs_usage_bytes{name="openclaw-gateway", device=~".*workspace.*"} / container_fs_limit_bytes{name="openclaw-gateway", device=~".*workspace.*"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Volume workspace do OpenClaw acima de 90% da capacidade"
